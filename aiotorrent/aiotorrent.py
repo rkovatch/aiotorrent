@@ -1,15 +1,17 @@
-import io
 import copy
 import asyncio
 import hashlib
 import logging
 import platform
-
 import json
+from io import IOBase
+from os import PathLike
+
+from aiotorrent.core.trackers import TrackerBaseClass
 from aiotorrent.peer import Peer
 from aiotorrent.core.bencode_utils import bencode_util
 from aiotorrent.core.util import chunk, PieceWriter
-from aiotorrent.core.file_utils import FileTree
+from aiotorrent.core.file_utils import File, FileTree
 from aiotorrent.tracker_factory import TrackerFactory
 from aiotorrent.downloader import FilesDownloadManager
 from aiotorrent.core.util import DownloadStrategy
@@ -27,33 +29,35 @@ logger.addHandler(logging.NullHandler())
 
 
 class Torrent:
-	def __init__(self, torrent_file):
-		# The object passed is a file-like object
-		if isinstance(torrent_file, io.IOBase):
+	def __init__(self, torrent_file: IOBase | PathLike):
+		if isinstance(torrent_file, IOBase):
+			# The object passed is a file-like object
 			bencoded_data = torrent_file.read()
-		else:
+		elif isinstance(torrent_file, PathLike):
 			# The object passed is a filepath
 			with open(torrent_file, 'rb') as torrent:
 				bencoded_data = torrent.read()
+		else:
+			raise TypeError(f"torrent_file must be a file-like object or path-like str (got {type(torrent_file)})")
 
 		# dict_keys(['files', 'name', 'piece length', 'pieces'])
 		data = bencode_util.bdecode(bencoded_data)
 
-		self.trackers = list()
-		self.peers = list()
-		self.name = data['info']['name']
-		self.files = None # This will be replaced with a file_tree object
+		self.trackers: list[TrackerBaseClass] = []
+		self.peers: list[Peer] 				  = []
+		self.name: PathLike 				  = data['info']['name']
+		self.files: FileTree 				  = None # This will be replaced later
 
 		# Check if this torrent has multiple files
 		self.has_multiple_files = True if 'files' in data['info'] else False
 
-		size = int()
-		peers = list()
-		trackers = list()
-		piece_hashmap = dict()
-		announce = data['announce'] if 'announce' in data else None # announce is a string
-		files = data['info']['files'] if self.has_multiple_files else self.name
-		piece_len = data['info']['piece length']
+		size: int 					  				 = 0   # size in bytes of all files in the torrent
+		peers: list[tuple[str, int]] 			  	 = []  # list of peer (IP addr, port) tuples
+		trackers: list[str] 		  				 = []  # list of tracker URLs (in case of multiple trackers)
+		piece_hashmap: dict[int, str] 				 = {}  # map of piece numbers to piece hashes
+		announce: str | None 		  				 = data['announce'] if 'announce' in data else None  # tracker URL
+		files: dict[str, int | list[str]] | PathLike = data['info']['files'] if self.has_multiple_files else self.name  # dict like {length: int, path: [str, ...]}, or path-like str
+		piece_len: int 								 = data['info']['piece length']  # number of bytes per piece
 
 		# If torrent has multiple files, set torrent
 		# size to sum of length of all individual files
@@ -84,7 +88,6 @@ class Torrent:
 			'trackers': trackers,
 		}
 
-
 		# Add announce url to trackers list if announce exists
 		if announce: self.torrent_info['trackers'].append(announce)
 
@@ -100,7 +103,7 @@ class Torrent:
 		# for file in self.files:
 		# 	logger.debug(f"File: {file}")
 
-			
+
 	async def _contact_trackers(self):
 		task_list = list()
 
@@ -112,7 +115,7 @@ class Torrent:
 		await asyncio.gather(*task_list)
 
 
-	def _get_peers(self):
+	def _add_peers(self) -> set[tuple[str, int]]:
 		peers_aggregated = set()
 		# Get peers address from each tracker
 		# for tracker in self.trackers:
@@ -131,7 +134,7 @@ class Torrent:
 		return peers_aggregated
 
 
-	async def _get_peers_dht(self, timeout = 30):
+	async def _get_peers_dht(self, timeout = 30) -> set[tuple[str, int]]:
 		info_hash = self.torrent_info['info_hash']
 		dht_crawler = SimpleDHTCrawler(info_hash)
 		peers = await dht_crawler.crawl(min_peers_to_retrieve=100)
@@ -140,7 +143,7 @@ class Torrent:
 		return peers
 
 
-	def show_files(self):
+	def show_files(self) -> None:
 		for file in self.files:
 			logger.info(f"File: {file}")
 
@@ -148,7 +151,7 @@ class Torrent:
 	async def init(self, dht_enabled = False):
 		# Contact Trackers and get peers
 		await self._contact_trackers()
-		peer_addrs = self._get_peers() #TODO: Rename get_peers to add_peers
+		peer_addrs = self._add_peers()
 
 		dht_peers = set()
 		if dht_enabled:
@@ -156,9 +159,9 @@ class Torrent:
 			peer_addrs |= dht_peers
 
 		# If there are more than 512 peers, randomly shortlist them
-		#TODO: Use a better strategy to shortlist peers. 
+		#TODO: Use a better strategy to shortlist peers.
 		# When I tried opening connections to ~1300 peers parallely
-		# Error: ValueError: too many file descriptors in select() 
+		# Error: ValueError: too many file descriptors in select()
 		# ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
 		# if len(peer_addrs) > 128:
 		# 	shortlisted_peers = set()
@@ -188,7 +191,7 @@ class Torrent:
 		logger.info(f"{len(active_trackers)} trackers active")
 
 
-	async def download(self, file, strategy=DownloadStrategy.DEFAULT):
+	async def download(self, file: File, strategy=DownloadStrategy.DEFAULT):
 		#TODO: Add a peer_list parameter with the default value of self.peers
 		active_peers = [peer for peer in self.peers if peer.has_handshaked]
 		fd_man = FilesDownloadManager(self.torrent_info, active_peers)
@@ -206,7 +209,7 @@ class Torrent:
 					piece_writer.write(piece)
 
 
-	async def __generate_torrent_stream(self, file):
+	async def __generate_torrent_stream(self, file: File):
 		active_peers = [peer for peer in self.peers if peer.has_handshaked]
 		fd_man = FilesDownloadManager(self.torrent_info, active_peers)
 		piece_len = self.torrent_info['piece_len']
@@ -214,7 +217,7 @@ class Torrent:
 			yield piece.data
 
 
-	async def stream(self, file, host="127.0.0.1", port=8080):
+	async def stream(self, file: File, host="127.0.0.1", port=8080):
 		try:
 			from starlette.applications import Starlette
 			from starlette.responses import StreamingResponse
@@ -238,11 +241,11 @@ class Torrent:
 		await server.serve()
 
 
-	def get_torrent_info(self, format='json', verbose=False):
+	def get_torrent_info(self, format='json', verbose=False) -> str:
 		# TODO: Add Yaml as an export format
 		torrent_info = copy.deepcopy(self.torrent_info)
 		torrent_info['info_hash'] = torrent_info['info_hash'].hex()
-		
+
 		piece_hashmap = torrent_info.pop('piece_hashmap')
 		peer_list = torrent_info.pop('peers')
 

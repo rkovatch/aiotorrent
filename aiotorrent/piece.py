@@ -83,7 +83,7 @@ class Piece:
 
 		try:
 			artifacts = Parser(response).parse()
-			blocks = await Handler(artifacts, Peer=peer).handle()
+			blocks = await Handler(artifacts, peer=peer).handle()
 			for block in blocks:
 				logger.debug(f"Got {block} from {peer}")
 

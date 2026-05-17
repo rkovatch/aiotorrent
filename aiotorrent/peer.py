@@ -22,6 +22,8 @@ class Peer:
 		self.total_disconnects = 0
 
 		self.choking_me = True
+		self.am_choking = True
+		self.interested_in_me = False
 		self.am_interested = False
 		self.has_handshaked = False
 		self.has_bitfield = False
@@ -64,7 +66,7 @@ class Peer:
 			await self.writer.drain()
 			self.writer.close()
 			await self.writer.wait_closed()
-		logger.debug(f"{self} {message} Closed Connnection")
+		logger.debug(f"{self} {message} Closed Connection")
 
 
 	async def handshake(self):
@@ -74,30 +76,81 @@ class Peer:
 			handshake_message = Generator.gen_handshake(ih)
 			response = await self.send_message(handshake_message)
 			artifacts = Parser(response).parse()
-			await Handler(artifacts, Peer=self).handle()
+			await Handler(artifacts, peer=self).handle()
 
 
+	async def wait_for_handshake(self, timeout=5):
+		"""Wait for a handshake message from a peer who has connected to us."""
+		if not self.active:
+			return
 
-	async def intrested(self):
-		# send intrested message if handshake is done and client is choked
+		try:
+			# handshake msg is 68 bytes long
+			response = await asyncio.wait_for(self.reader.readexactly(68), timeout=timeout)
+
+			parsed_resp = Parser(response).parse()
+			await Handler(parsed_resp, peer=self).handle()
+
+			# Handler.handle() calls handle_handshake() which sets has_handshaked to True
+			if self.has_handshaked:
+				# but we haven't actually finished handshaking until we've sent our own
+				info_hash = self.torrent_info['info_hash']
+				our_handshake = Generator.gen_handshake(info_hash)
+
+				self.writer.write(our_handshake)
+				await self.writer.drain()
+
+				asyncio.create_task(self._listen_for_messages())
+
+			else:
+				await self.disconnect("Failed to validate incoming handshake.")
+
+		except asyncio.TimeoutError:
+			await self.disconnect("Timed out waiting for incoming handshake.")
+		except asyncio.IncompleteReadError:
+			await self.disconnect("Disconnected before completing handshake.")
+		except Exception as e:
+			await self.disconnect(f"Error during incoming handshake: {e}")
+
+
+	async def _listen_for_messages(self):
+		"""Listen for incoming messages from this peer."""
+		while self.active:
+			try:
+				# 4-byte length prefix
+				msg_length_bytes = await asyncio.wait_for(self.reader.readexactly(4), timeout=None)
+				msg_length = int.from_bytes(msg_length_bytes, byteorder='big')
+
+				# read the rest of the msg
+				message_bytes = await asyncio.wait_for(self.reader.readexactly(msg_length), timeout=None)
+
+				# TODO: finish this method
+
+			except Exception as e:
+				await self.disconnect(f"Encountered exception while listening: {e}.")
+				break
+
+
+	async def interested(self):
+		# send interested message if handshake is done and client is choked
 		if self.active and self.has_handshaked:# and not self.choking_me:
 			interested_message = Generator.gen_interested()
 			response = await self.send_message(interested_message)
 			artifacts = Parser(response).parse()
-			await Handler(artifacts, Peer=self).handle()
+			await Handler(artifacts, peer=self).handle()
 
 
 	async def send_message(self, message, timeout=3):
 		# Raise error if send_message() is called but peer is inactive
 		# If send_message was called and the current status of the peer is not active
-		# This means that this peer dropped the connection mid execution
+		# This means that this peer dropped the connection mid-execution
 		# So, we will re-establish a connection and re-raise the exception
 		if not self.active:
 			if self.total_disconnects > 10:
 				return
 			await self.connect()
 			await self.handshake()
-			await self.intrested()
+			await self.interested()
 
 			if self.active:
 				logger.warning(f"Tried sending message to inactive {self}. Successfully re-established connection!")

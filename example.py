@@ -31,8 +31,8 @@ async def main():
 
 		start = dt.now()
 		print(f"Started Execution at: {start}")
-		await torrent.init(dht_enabled=True)
-		# pprint(torrent.get_torrent_info())
+		await torrent.init(dht_enabled=True, seeding_enabled=True)
+		# print(torrent.get_torrent_info())
 		for file in torrent.files:
 			await torrent.download(file, strategy=DownloadStrategy.DEFAULT)
 

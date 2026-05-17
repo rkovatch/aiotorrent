@@ -4,6 +4,7 @@ import hashlib
 import logging
 import platform
 import json
+from asyncio import StreamReader, StreamWriter
 from io import IOBase
 from os import PathLike
 
@@ -29,11 +30,11 @@ logger.addHandler(logging.NullHandler())
 
 
 class Torrent:
-	def __init__(self, torrent_file: IOBase | PathLike):
+	def __init__(self, torrent_file: IOBase | PathLike | str):
 		if isinstance(torrent_file, IOBase):
 			# The object passed is a file-like object
 			bencoded_data = torrent_file.read()
-		elif isinstance(torrent_file, PathLike):
+		elif isinstance(torrent_file, str | PathLike):
 			# The object passed is a filepath
 			with open(torrent_file, 'rb') as torrent:
 				bencoded_data = torrent.read()
@@ -103,6 +104,8 @@ class Torrent:
 		# for file in self.files:
 		# 	logger.debug(f"File: {file}")
 
+		self.server = None  # this will be populated by asyncio.start_server when self.listen_for_peers is called
+
 
 	async def _contact_trackers(self):
 		task_list = list()
@@ -142,13 +145,28 @@ class Torrent:
 		logger.info(f"Got {len(peers)} Peers using DHT")
 		return peers
 
+	async def _handle_incoming_connection(self, reader: StreamReader, writer: StreamWriter):
+		"""Callback triggered whenever a new peer connects to us."""
+		peer_addr = writer.get_extra_info('peername')
+		logger.info(f"Seeding: Incoming connection accepted from {peer_addr}")
+
+		# TODO: find more elegant way to instantiate the new peer
+		new_peer = Peer(peer_addr, self.torrent_info)
+		new_peer.reader = reader
+		new_peer.writer = writer
+		new_peer.active = True
+
+		self.peers.append(new_peer)
+
+		asyncio.create_task(new_peer.wait_for_handshake())
+
 
 	def show_files(self) -> None:
 		for file in self.files:
 			logger.info(f"File: {file}")
 
 
-	async def init(self, dht_enabled = False):
+	async def init(self, dht_enabled: bool = False, seeding_enabled: bool = False) -> None:
 		# Contact Trackers and get peers
 		await self._contact_trackers()
 		peer_addrs = self._add_peers()
@@ -178,7 +196,7 @@ class Torrent:
 		handshakes = [peer.handshake() for peer in self.peers]
 		await asyncio.gather(*handshakes)
 
-		interested_msgs = [peer.intrested() for peer in self.peers]
+		interested_msgs = [peer.interested() for peer in self.peers]
 		await asyncio.gather(*interested_msgs)
 
 		# Add peers addresses to torrent_info
@@ -189,6 +207,24 @@ class Torrent:
 		active_trackers = [tracker for tracker in self.trackers if tracker.active]
 		logger.info(f"{len(active_peers)} peers active")
 		logger.info(f"{len(active_trackers)} trackers active")
+
+		if seeding_enabled:
+			await self.listen_for_peers()
+
+
+	async def listen_for_peers(self, host="0.0.0.0", port=6881):
+		"""Starts a TCP server to listen for peers who wish to download from us."""
+		try:
+			self.server = await asyncio.start_server(
+				self._handle_incoming_connection,
+				host,
+				port
+			)
+			logger.info(f"Seeding: Listening for connections on {host}:{port}")
+
+			asyncio.create_task(self.server.serve_forever())
+		except Exception as e:
+			logger.error(f"Seeding: Failed to start listener on {host}:{port}: {e}")
 
 
 	async def download(self, file: File, strategy=DownloadStrategy.DEFAULT):

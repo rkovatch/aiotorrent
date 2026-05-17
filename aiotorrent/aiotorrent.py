@@ -6,7 +6,9 @@ import platform
 import json
 from asyncio import StreamReader, StreamWriter
 from io import IOBase
-from os import PathLike
+from os import PathLike, path
+
+from bitstring import BitArray
 
 from aiotorrent.core.trackers import TrackerBaseClass
 from aiotorrent.peer import Peer
@@ -47,7 +49,7 @@ class Torrent:
 		self.trackers: list[TrackerBaseClass] = []
 		self.peers: list[Peer] 				  = []
 		self.name: PathLike 				  = data['info']['name']
-		self.files: FileTree 				  = None # This will be replaced later
+		self.files: FileTree 				  = None  # This will be replaced later
 
 		# Check if this torrent has multiple files
 		self.has_multiple_files = True if 'files' in data['info'] else False
@@ -77,6 +79,7 @@ class Torrent:
 		# for every 20 byte in raw_pieces -> str, map index:piece (int:str) to pieces
 		for index, piece in enumerate(chunk(raw_pieces, 20)):
 			piece_hashmap[index] = piece
+		local_pieces = BitArray(length=len(piece_hashmap))  # bitfield representing pieces we have on disk
 
 		self.torrent_info = {
 			'name': data['info']['name'],
@@ -87,6 +90,7 @@ class Torrent:
 			'piece_hashmap': piece_hashmap,
 			'peers': peers,
 			'trackers': trackers,
+			'local_pieces': local_pieces
 		}
 
 		# Add announce url to trackers list if announce exists
@@ -167,6 +171,9 @@ class Torrent:
 
 
 	async def init(self, dht_enabled: bool = False, seeding_enabled: bool = False) -> None:
+		# Start by seeing what pieces we already have
+		await self.verify_local_data()
+
 		# Contact Trackers and get peers
 		await self._contact_trackers()
 		peer_addrs = self._add_peers()
@@ -210,6 +217,55 @@ class Torrent:
 
 		if seeding_enabled:
 			await self.listen_for_peers()
+
+
+	def _verify_single_piece(self, index, data):
+		"""Hashes data and updates the local bitfield if it matches."""
+		piece_hash = hashlib.sha1(data).digest()
+		if piece_hash == self.torrent_info['piece_hashmap'][index]:
+			self.torrent_info['local_pieces'][index] = True
+
+
+	async def verify_local_data(self) -> None:
+		"""Look for files already present on disk and verify their contents."""
+
+		logger.info(f"Verifying local data...")
+
+		num_pieces = len(self.torrent_info['piece_hashmap'])
+		piece_len: int = self.torrent_info['piece_len']
+
+		current_piece_index = 0
+		current_piece_data = b""
+		for file in self.files:
+			filepath = path.join(self.torrent_info['name'], file.name)
+
+			if not path.exists(filepath):
+				logger.debug(f"File missing: {filepath}")
+				continue
+
+			with open(filepath, 'rb') as f:
+				while True:
+					# compute how many bytes we have left to read for this piece
+					bytes_needed = piece_len - len(current_piece_data)
+					f_chunk = f.read(bytes_needed)  # f.read may return less than bytes_needed if EOF is reached
+
+					if not f_chunk:
+						break
+
+					current_piece_data += f_chunk
+
+					# verify the piece when we've assembled it in full
+					if len(current_piece_data) == piece_len:
+						self._verify_single_piece(current_piece_index, current_piece_data)
+						current_piece_index += 1
+						current_piece_data = b""
+
+		# don't forget to verify the last piece if it is less than piece_len in size
+		if current_piece_data and current_piece_index == num_pieces - 1:
+			self._verify_single_piece(current_piece_index, current_piece_data)
+
+		have_count = self.torrent_info['local_pieces'].count(True)
+		logger.info(f"Verification complete: {have_count}/{num_pieces} pieces on disk.")
 
 
 	async def listen_for_peers(self, host="0.0.0.0", port=6881):

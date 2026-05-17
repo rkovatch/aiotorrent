@@ -15,9 +15,13 @@ class PeerResponseParser:
 		# self created index. Does not necessarily follow bittorrent protocol specification
 			0: self.parse_choke,
 			1: self.parse_unchoke,
+			2: self.parse_interested,
+			3: self.parse_not_interested,
 			4: self.parse_have,
 			5: self.parse_bitfield,
+			6: self.parse_request,
 			7: self.parse_piece,
+			8: self.parse_cancel,
 			19: self.parse_handshake,
 			None: self.parse_keep_alive
 		}
@@ -76,8 +80,20 @@ class PeerResponseParser:
 		message = self.response[:5]
 		self.response = self.response[5:]
 		self.artifacts.update({'unchoke': True})
-		
-		
+
+
+	def parse_interested(self):
+		message = self.response[:5]
+		self.response = self.response[5:]
+		self.artifacts.update({'interested': True})
+
+
+	def parse_not_interested(self):
+		message = self.response[:5]
+		self.response = self.response[5:]
+		self.artifacts.update({'not_interested': True})
+
+
 	def parse_have(self):
 		message = self.response[:9]
 		# We just need the piece index so we can ignore the first 5 bytes of message.
@@ -85,8 +101,20 @@ class PeerResponseParser:
 		piece_index = unpack('>I', message[5:])[0]
 		self.response = self.response[9:]
 		self.artifacts.update({'have': {piece_index: True}})
-		
-	
+
+
+	def parse_request(self):
+		if not 'requests' in self.artifacts: self.artifacts['requests'] = list()
+
+		try:
+			index, begin, length = unpack('>III', self.response[5:17])  # index, begin, length are each 32-bit ints
+			self.artifacts['requests'].append((index, begin, length))
+		except UnpackError:
+			raise TypeError("Parser: Failed to extract request message")
+		finally:
+			self.response = self.response[17:]
+
+
 	def parse_piece(self):
 		# Returns index, offset and block except when there's
 		# an unpack error. In the second case, It raises a TypeError
@@ -102,6 +130,19 @@ class PeerResponseParser:
 			raise TypeError("Parser: Failed to extract piece")
 		finally:
 			self.response = self.response[total:]
+
+
+	def parse_cancel(self):
+		# same as request but we append to diff artifact
+		if not 'cancels' in self.artifacts: self.artifacts['cancels'] = list()
+
+		try:
+			index, begin, length = unpack('>III', self.response[5:17])
+			self.artifacts['cancels'].append((index, begin, length))
+		except UnpackError:
+			raise TypeError("Parser: Failed to extract cancel message")
+		finally:
+			self.response = self.response[17:]
 		
 		
 	def parse_bitfield(self):

@@ -1,5 +1,7 @@
 from struct import pack
 
+import bitstring
+
 
 class MessageGenerator:
 	"""
@@ -24,6 +26,17 @@ class MessageGenerator:
 			b"ABCD" + b"X"*16			
 		)
 
+		return message
+
+
+	@staticmethod
+	def gen_bitfield(bit_array: bitstring.BitArray):
+
+		serialized_bitfield = bit_array.tobytes()
+		mlen = 1 + len(serialized_bitfield)
+		mid = 5
+
+		message = pack(f">IB{len(serialized_bitfield)}s", mlen, mid, serialized_bitfield)
 		return message
 
 

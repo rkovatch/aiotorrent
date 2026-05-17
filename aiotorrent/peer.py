@@ -96,8 +96,13 @@ class Peer:
 				# but we haven't actually finished handshaking until we've sent our own
 				info_hash = self.torrent_info['info_hash']
 				our_handshake = Generator.gen_handshake(info_hash)
-
 				self.writer.write(our_handshake)
+
+				# if we have any local pieces, send our bitfield
+				if 'local_pieces' in self.torrent_info and self.torrent_info['local_pieces'].any(True):
+					our_bitfield = Generator.gen_bitfield(self.torrent_info['local_pieces'])
+					self.writer.write(our_bitfield)
+
 				await self.writer.drain()
 
 				asyncio.create_task(self._listen_for_messages())
@@ -118,14 +123,22 @@ class Peer:
 		while self.active:
 			try:
 				# 4-byte length prefix
-				msg_length_bytes = await asyncio.wait_for(self.reader.readexactly(4), timeout=None)
+				msg_length_bytes = await asyncio.wait_for(self.reader.readexactly(4), timeout=120)
 				msg_length = int.from_bytes(msg_length_bytes, byteorder='big')
 
 				# read the rest of the msg
-				message_bytes = await asyncio.wait_for(self.reader.readexactly(msg_length), timeout=None)
+				message_bytes = await asyncio.wait_for(self.reader.readexactly(msg_length), timeout=120)
 
-				# TODO: finish this method
+				artifacts = Parser(msg_length_bytes + message_bytes).parse()
+				await Handler(artifacts, peer=self).handle()
 
+			except asyncio.TimeoutError:
+				logger.debug(f"Timeout waiting for messages from {self.address}.")
+				await self.disconnect("Idle timeout.")
+				break
+			except asyncio.IncompleteReadError:
+				await self.disconnect("Connection dropped mid-message.")
+				break
 			except Exception as e:
 				await self.disconnect(f"Encountered exception while listening: {e}.")
 				break

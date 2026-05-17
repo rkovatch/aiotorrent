@@ -26,12 +26,16 @@ class PeerResponseHandler:
 			if "keep_alive" in self.artifacts: self.handle_keep_alive() 
 			if "choke" in self.artifacts: await self.handle_choke()
 			if "unchoke" in self.artifacts: self.handle_unchoke()
+			if "interested" in self.artifacts: self.handle_interested()
+			if "not_interested" in self.artifacts: self.handle_not_interested()
 			if "handshake" in self.artifacts: await self.handle_handshake()
 			# Merged have_handler into bitfield_handler
 			if "have" in self.artifacts: self.handle_bitfield()
 			if "bitfield" in self.artifacts: self.handle_bitfield()
 			# Piece handler is special as it returns values
+			if "requests" in self.artifacts: return self.handle_request()
 			if "pieces" in self.artifacts: return self.handle_piece()
+			if "cancel" in self.artifacts: return self.handle_cancel()
 
 
 
@@ -50,6 +54,18 @@ class PeerResponseHandler:
 		self.peer.am_interested = True
 		logger.debug(f"Unchoke from {self.peer}")
 		self.artifacts.pop('unchoke')
+
+
+	def handle_interested(self):
+		self.peer.interested_in_me = True
+		logger.debug(f"{self.peer} is interested")
+		self.artifacts.pop('interested')
+
+
+	def handle_not_interested(self):
+		self.peer.interested_in_me = False
+		logger.debug(f"{self.peer} is no longer interested")
+		self.artifacts.pop('not_interested')
 
 
 	async def handle_handshake(self):
@@ -105,6 +121,17 @@ class PeerResponseHandler:
 			logger.debug(f"Bitfield from {self.peer}")
 
 
+	async def handle_request(self):
+		requests = self.artifacts['requests']
+		for index, begin, length in requests:
+			logger.debug(f"Peer {self.peer} requested piece {index}, offset {begin}, length {length}")
+
+		if not self.peer.am_choking:
+			pass  # TODO: read the requested block from disk and queue it to send out
+
+		self.artifacts.pop('requests')
+
+
 	def handle_piece(self):
 		# This is the only method which returns any value
 		blocks = list()
@@ -118,3 +145,13 @@ class PeerResponseHandler:
 			
 		self.artifacts.pop('pieces')
 		return blocks
+
+
+	def handle_cancel(self):
+		cancels = self.artifacts['cancels']
+		for index, begin, length in cancels:
+			logger.debug(f"Peer {self.peer} canceled request for piece {index}, offset {begin}")
+
+		# TODO: remove block from request queue
+
+		self.artifacts.pop('cancels')

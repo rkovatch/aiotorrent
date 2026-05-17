@@ -1,4 +1,4 @@
-import fastbencode
+import bencode
 
 
 class BencodeUtil:
@@ -38,11 +38,11 @@ class BencodeUtil:
 
 
     def bdecode(self, data):
-        return self.to_py(fastbencode.bdecode(data))
+        return self.to_py(bencode.bdecode(data))
 
 
     def bencode(self, obj):
-        return fastbencode.bencode(self.to_bytes(obj))
+        return bencode.bencode(self.to_bytes(obj))
 
 
 bencode_util = BencodeUtil()

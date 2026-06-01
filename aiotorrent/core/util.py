@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from enum import Enum
 from pathlib import Path
 
@@ -26,8 +27,7 @@ class Block:
 
 
 	def __repr__(self):
-		return (f"Block #{self.piece_num}-{self.num}")
-
+		return f"Block #{self.piece_num}-{self.num}"
 
 
 class PieceWriter:
@@ -40,7 +40,10 @@ class PieceWriter:
 
 	def __enter__(self):
 		filepath = f"{self.directory}/{self.file.name}"
-		self.target_file = open(filepath, 'wb')
+		if not os.path.exists(filepath):
+			self.target_file = open(filepath, "xb+")  # create the file with r/w
+		else:
+			self.target_file = open(filepath, 'rb+')  # open for r/w without truncating
 		return self
 
 

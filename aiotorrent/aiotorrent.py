@@ -15,6 +15,7 @@ from aiotorrent.peer import Peer
 from aiotorrent.core.bencode_utils import bencode_util
 from aiotorrent.core.util import chunk, PieceWriter
 from aiotorrent.core.file_utils import File, FileTree
+from aiotorrent.piece import Piece
 from aiotorrent.tracker_factory import TrackerFactory
 from aiotorrent.downloader import FilesDownloadManager
 from aiotorrent.core.util import DownloadStrategy
@@ -234,6 +235,7 @@ class Torrent:
 		num_pieces = len(self.torrent_info['piece_hashmap'])
 		piece_len: int = self.torrent_info['piece_len']
 
+		# TODO: use Piece class here instead? (figure out instantiating w/ piece_info)
 		current_piece_index = 0
 		current_piece_data = b""
 		for file in self.files:

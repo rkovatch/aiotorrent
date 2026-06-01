@@ -17,7 +17,7 @@ stream_handler = logging.StreamHandler()
 # Uncomment line number 14 and 18 to save logs to file
 # file_handler = logging.FileHandler(f"utils/logs/{formatted_date}.log")
 
-logging.basicConfig(level=logging.INFO, handlers=[
+logging.basicConfig(level=logging.DEBUG, handlers=[
 	stream_handler,
 	# file_handler,
 ])

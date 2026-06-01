@@ -41,6 +41,7 @@ class FilesDownloadManager:
 
 		self.piece_info = piece_info
 		self.piece_hashmap = torrent_info['piece_hashmap']
+		self.local_pieces = torrent_info['local_pieces']
 		self.file_tree = FileTree(torrent_info)
 
 		peer_def = 10   # Peer default priority
@@ -55,14 +56,19 @@ class FilesDownloadManager:
 
 	def create_pieces_queue(self, file: File) -> None:
 		piece_def = 3   # Default piece priority
+
 		for piece_num in range(file.start_piece, file.end_piece + 1):
-			self.file_pieces.put_nowait((piece_def, piece_num))
+			# check if we may have already seeded any pieces
+			if self.local_pieces and self.local_pieces[piece_num]:
+				logger.debug(f"Skipping piece {piece_num} as we already have it on disk.")
+			else:
+				self.file_pieces.put_nowait((piece_def, piece_num))
 
 
 	def file_downloaded(self) -> bool:
-		'''
-		Returns true if all the pieces have been downloaded, false otherwise
-		'''
+		"""
+        Returns true if all the pieces have been downloaded, false otherwise
+        """
 		return True if self.file_pieces.empty() else False
 
 

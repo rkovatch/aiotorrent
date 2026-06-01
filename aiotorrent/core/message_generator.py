@@ -41,6 +41,20 @@ class MessageGenerator:
 
 
 	@staticmethod
+	def gen_choke():
+		mlen, mid = 1, 0
+		message = pack(">IB", mlen, mid)
+		return message
+
+
+	@staticmethod
+	def gen_unchoke():
+		mlen, mid = 1, 1
+		message = pack(">IB", mlen, mid)
+		return message
+
+
+	@staticmethod
 	def gen_interested():
 		mlen, mid = 1, 2
 		message = pack(">IB", mlen, mid)
@@ -48,7 +62,15 @@ class MessageGenerator:
 
 
 	@staticmethod
-	def gen_request(index, offset, BLOCK_SIZE=(2 ** 14)):
+	def gen_request(index, offset, block_size= 2**14):
 		mlen, mid = 13, 6
-		message = pack(">IBIII", mlen, mid, index, offset, BLOCK_SIZE)
+		message = pack(">IBIII", mlen, mid, index, offset, block_size)
+		return message
+
+
+	@staticmethod
+	def gen_piece(index, offset, piece_data):
+		payload_len = len(piece_data)
+		mlen, mid = 9 + payload_len, 7
+		message = pack(f">IBII{payload_len}s", mlen, mid, index, offset, piece_data)
 		return message

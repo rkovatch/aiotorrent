@@ -41,7 +41,7 @@ class FilesDownloadManager:
 
 		self.piece_info = piece_info
 		self.piece_hashmap = torrent_info['piece_hashmap']
-		self.local_pieces = torrent_info['local_pieces']
+		self.local_pieces = torrent_info.get('local_pieces')
 		self.file_tree = FileTree(torrent_info)
 
 		peer_def = 10   # Peer default priority

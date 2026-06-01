@@ -15,7 +15,6 @@ from aiotorrent.peer import Peer
 from aiotorrent.core.bencode_utils import bencode_util
 from aiotorrent.core.util import chunk, PieceWriter
 from aiotorrent.core.file_utils import File, FileTree
-from aiotorrent.piece import Piece
 from aiotorrent.tracker_factory import TrackerFactory
 from aiotorrent.downloader import FilesDownloadManager
 from aiotorrent.core.util import DownloadStrategy
@@ -171,7 +170,7 @@ class Torrent:
 			logger.info(f"File: {file}")
 
 
-	async def init(self, dht_enabled: bool = False, seeding_enabled: bool = False) -> None:
+	async def init(self, dht_enabled: bool = False) -> None:
 		# Start by seeing what pieces we already have
 		await self.verify_local_data()
 
@@ -215,9 +214,6 @@ class Torrent:
 		active_trackers = [tracker for tracker in self.trackers if tracker.active]
 		logger.info(f"{len(active_peers)} peers active")
 		logger.info(f"{len(active_trackers)} trackers active")
-
-		if seeding_enabled:
-			await self.listen_for_peers()
 
 
 	def _verify_single_piece(self, index, data):
@@ -270,7 +266,7 @@ class Torrent:
 		logger.info(f"Verification complete: {have_count}/{num_pieces} pieces on disk.")
 
 
-	async def listen_for_peers(self, host="0.0.0.0", port=6881):
+	async def seed(self, host="0.0.0.0", port=6881):
 		"""Starts a TCP server to listen for peers who wish to download from us."""
 		try:
 			self.server = await asyncio.start_server(
@@ -280,7 +276,7 @@ class Torrent:
 			)
 			logger.info(f"Seeding: Listening for connections on {host}:{port}")
 
-			asyncio.create_task(self.server.serve_forever())
+			await self.server.serve_forever()
 		except Exception as e:
 			logger.error(f"Seeding: Failed to start listener on {host}:{port}: {e}")
 

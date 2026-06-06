@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from bitstring import BitArray
+from time import perf_counter
 
 from aiotorrent.core.response_handler import PeerResponseHandler as Handler
 from aiotorrent.core.response_parser import PeerResponseParser as Parser
@@ -62,6 +63,13 @@ class Peer:
 	async def disconnect(self, message=''):
 		self.active = False
 		self.total_disconnects += 1
+
+		if hasattr(self, "seed_start_time"):
+			end_time = perf_counter()
+			elapsed_seconds = end_time - self.seed_start_time
+			logger.info(f"[Perf] Peer disconnected. Seeded for {elapsed_seconds:.2f} seconds.")
+			delattr(self, "seed_start_time")
+
 		if hasattr(self, 'writer'):
 			await self.writer.drain()
 			self.writer.close()

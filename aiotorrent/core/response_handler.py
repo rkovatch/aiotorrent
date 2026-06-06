@@ -2,6 +2,7 @@ import logging
 from os import path
 from struct import unpack
 from bitstring import BitArray
+from time import perf_counter
 
 from aiotorrent.core.message_generator import MessageGenerator
 from aiotorrent.core.util import Block
@@ -116,6 +117,11 @@ class PeerResponseHandler:
 			unchoke_msg = MessageGenerator.gen_unchoke()
 			self.peer.writer.write(unchoke_msg)
 
+		# Initialize a seed timer on the peer object if it doesn't exist
+		if not hasattr(self.peer, "seed_start_time"):
+			self.peer.seed_start_time = perf_counter()
+			logger.info(f"[Perf] Started timer for seeding to {self.peer}")
+
 		self.artifacts.pop('interested')
 
 
@@ -127,6 +133,14 @@ class PeerResponseHandler:
 			self.peer.am_choking = True
 			choke_msg = MessageGenerator.gen_choke()
 			self.peer.writer.write(choke_msg)
+
+		if hasattr(self.peer, "seed_start_time"):
+			end_time = perf_counter()
+			elapsed_seconds = end_time - self.peer.seed_start_time
+			logger.info(f"[Perf] Finished seeding to {self.peer} in {elapsed_seconds:.2f} seconds.")
+
+			# Clean up the property in case they become interested again later
+			delattr(self.peer, "seed_start_time")
 
 		self.artifacts.pop('not_interested')
 

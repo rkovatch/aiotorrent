@@ -25,29 +25,29 @@ logging.basicConfig(level=logging.INFO, handlers=[
 
 async def main():
 	print("*"*64)
-	# try:
-	torrent_file = sys.argv[1]
-	torrent = Torrent(torrent_file)
+	try:
+		torrent_file = sys.argv[1]
+		torrent = Torrent(torrent_file)
 
-	start = dt.now()
-	print(f"Started Execution at: {start}")
-	await torrent.init(dht_enabled=True)
-	# print(torrent.get_torrent_info())
-	for file in torrent.files:
-		await torrent.download(file, strategy=DownloadStrategy.DEFAULT)
+		start = dt.now()
+		print(f"Started Execution at: {start}")
+		await torrent.init(dht_enabled=True)
+		# print(torrent.get_torrent_info())
+		for file in torrent.files:
+			await torrent.download(file, strategy=DownloadStrategy.DEFAULT)
 
-	await torrent.seed()
+		await torrent.seed()
 
-	end = dt.now()
-	elapsed = end - start
-	print(f"Execution completed in: {elapsed}")
+		end = dt.now()
+		elapsed = end - start
+		print(f"Execution completed in: {elapsed}")
 
-	# except IndexError:
-	# 	print("[x] No torrent file supplied")
-	# 	sys.exit(1)
+	except IndexError:
+		print("[x] No torrent file supplied")
+		sys.exit(1)
 
-	# except Exception:
-	# 	traceback.print_exc()
+	except Exception:
+		traceback.print_exc()
 
 
 async def stream_test():

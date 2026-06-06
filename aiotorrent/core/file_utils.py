@@ -18,6 +18,9 @@ class File:
 		start_piece, start_byte = divmod(counted, piece_size)
 		end_piece, end_byte = divmod((counted + self.size), piece_size)
 
+		if end_byte == 0 and end_piece > 0:  # if the torrent is divided perfectly by the piece size, then the last
+			end_piece -= 1					 # file will have an errant 0-byte piece. we fix by decrementing end_piece
+
 		self.start_piece = start_piece
 		self.start_byte = start_byte
 		self.end_piece = end_piece
